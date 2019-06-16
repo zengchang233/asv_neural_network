@@ -14,6 +14,7 @@ numpy
 pandas
 matplotlib
 tqdm
+torchsummary
 ```
 
 ## ResNet + LMCL
