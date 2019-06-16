@@ -25,10 +25,15 @@ cd LMCL
 python train.py
 ```
 
-EER: 4.3%
+EER: 4.30%
 
 ## ResNet + Angular
+```
+cd AngularLoss
+python train.py
+```
 
+EER: 4.80%
 ## ResNet + Softmax
 ```
 cd SoftmaxLoss
