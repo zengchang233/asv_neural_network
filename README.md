@@ -47,6 +47,7 @@ python train.py
 
 EER: 7.55%
 ## ResNet + Triplet
+waiting...
 
 ## Contact
 Email: zengchang.elec@gmail.com
