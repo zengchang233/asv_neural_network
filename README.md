@@ -30,7 +30,12 @@ EER: 4.3%
 ## ResNet + Angular
 
 ## ResNet + Softmax
+```
+cd SoftmaxLoss
+python train.py
+```
 
+EER: 7.55%
 ## ResNet + Triplet
 
 ## Contact
