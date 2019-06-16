@@ -19,7 +19,7 @@ tqdm
 torchsummary
 ```
 
-## ResNet + LMCL
+## ResNet + LMCL (未来杯决赛方案)
 ```
 cd LMCL
 python train.py
