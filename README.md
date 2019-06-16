@@ -3,6 +3,11 @@ neural network and loss for asv
 
 Thanks to [Runner up of TongDun ASV Competition](https://www.kesci.com/home/competition/forum/5bdc5926954d6e001060d5a9)
 
+Training dataset is Voxceleb1_dev
+
+Evaluate dataset is Voxceleb1_test
+
+Evaluation criterion is EER(equal error rate)
 ## Requirements
 ```
 pytorch
