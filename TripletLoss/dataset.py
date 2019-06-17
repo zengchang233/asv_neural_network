@@ -100,7 +100,7 @@ class BalancedBatchSampler(BatchSampler):
     """
 
     def __init__(self, labels, all_speech, n_classes, n_samples):
-        self.labels = labels
+        self.labels = list(set(labels))
         self.count = 0
         self.n_classes = n_classes
         self.n_samples = n_samples
@@ -118,7 +118,7 @@ class BalancedBatchSampler(BatchSampler):
             self.count += self.n_classes * self.n_samples
 
     def __len__(self):
-        return self.speech_per_speaker.sum().item() // self.batch_size
+        return self.n_dataset // self.batch_size
 
 class SpeakerTrainDataset(Dataset):
     def __init__(self):
@@ -138,6 +138,7 @@ class SpeakerTrainDataset(Dataset):
                     current_sid = sid
                 self.dataset[-1].append((filename, float(duration), int(samplerate)))  
                 self.count += 1  
+                self.labels.append(sid)
         self.n_classes = len(self.dataset)
 
     def __len__(self):
@@ -201,7 +202,7 @@ class SpeakerTestDataset(Dataset):
         self.features = []
         self.pairID = []
         # task.csv是voxceleb1官网的测试pairs
-        with open('/home/zeng/zeng/datasets/voxceleb1/task/task.csv') as f:
+        with open('./task/task.csv') as f:
             pairs = f.readlines()
             for pair in pairs:
                 pair = pair[2:]

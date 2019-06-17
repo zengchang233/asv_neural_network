@@ -78,7 +78,7 @@ class FunctionNegativeTripletSelector(TripletSelector):
     def get_triplets(self, embeddings, labels):
         if self.cpu:
             embeddings = embeddings.cpu()
-        cos_matrix = F.cosine_similarity(embeddings, embeddings.T) # get cosine_distance_matrix
+        cos_matrix = F.linear(embeddings, embeddings) # get cosine_distance_matrix
         cos_matrix = cos_matrix.cpu()
 
         labels = labels.cpu().data.numpy() # labels size = (batch_size)

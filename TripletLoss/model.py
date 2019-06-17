@@ -17,15 +17,14 @@ class OnlineTripletLoss(nn.Module):
         super(OnlineTripletLoss, self).__init__()
         self.margin = margin
         self.triplet_selector = triplet_selector
-        self.loss = TripletMarginLoss(self.margin, 2)
 
     def forward(self, embeddings, target):
         triplets = self.triplet_selector.get_triplets(embeddings, target)
         if embeddings.is_cuda:
             triplets = triplets.cuda()
-        ap_distances = (embeddings[triplets[:, 0]] - embeddings[triplets[:, 1]]).pow(2).sum(1)  # .pow(.5)
-        an_distances = (embeddings[triplets[:, 0]] - embeddings[triplets[:, 2]]).pow(2).sum(1)  # .pow(.5)
-        losses = F.relu(ap_distances - an_distances + self.margin)
+        ap_cos = F.cosine_similarity(embeddings[triplets[:,0]], embeddings[triplets[:,1]])  # .pow(.5)
+        an_cos = F.cosine_similarity(embeddings[triplets[:,0]], embeddings[triplets[:,2]]) # .pow(.5)
+        losses = F.relu(an_cos - ap_cos + self.margin)
         return losses.mean(), len(triplets)
 
 class ReLU20(nn.Hardtanh):#relu

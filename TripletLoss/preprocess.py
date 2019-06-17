@@ -1,137 +1,96 @@
-import sidekit
-import pandas as pd
-import numpy as np
+import csv
 import os
-import random
-import subprocess
-from multiprocessing import cpu_count
 
-def downsampling(audio_dir):
-	speech = os.listdir(audio_dir)
-	for i in speech:
-		speech_path = os.path.join(audio_dir, i)
-		subprocess.run(['sox',speech_path,'-r','16000',speech_path])
+import soundfile as sf
+from tqdm import tqdm
+import pandas as pd
+from scipy.optimize import brentq
+from scipy.interpolate import interp1d
+from sklearn.metrics import roc_curve
+import sys
+import numpy as np
 
-def readDirStruct(audio_path, train = True):
-    '''
-    param:
-        path  : path to wav dir
-        train : if True, extract train feature, else, extract Test feature
-    return:
-        wavlist : wav file list for FeatureServer
-    '''
-    if not os.path.exists(os.getcwd() + '/log/'):
-        os.mkdir(os.getcwd() + '/log/')
-    if train:
-        wav_dir = audio_path
-        speaker_list = os.listdir(wav_dir)
-        wavlist = []
-        for i in speaker_list:
-            speaker_dir_path = wav_dir + '/' + i
-            speech_list = os.listdir(speaker_dir_path) # .wav audio
-            if len(speech_list) > 30:
-                for j in speech_list:
-                    wavlist.append(i + '/' + j.split('.')[0])
-        log_file_name = os.getcwd() + '/log/aishell2_train.log'
-    else:
-        wav_dir = audio_path
-#downsampling(wav_dir)
-        wavlist = [i.split('.')[0] for i in os.listdir(wav_dir)]
-        log_file_name = os.getcwd() + '/log/aishell2_test.log'
-    with open(log_file_name, 'w') as fobj:
-        for i in wavlist:
-            fobj.write(i+'\n')
-        return wavlist
+SAMPLE_RATE = 16000
+MANIFEST_DIR = '/home/zeng/zeng/my_code/angular_softmax/manifest/{}_manifest.csv'
 
-def extractFeature(audio_dir, feature_dir, train = True):
-    '''
-    param:
-        audio_dir   : path to audio dir
-        feature_dir : path to feature dir
-        train       : if True, extract feature from train set, else, from test set
-    return:
-        None
-    '''
-    # if feature dir not exists, create feature dir
-    if not os.path.exists(feature_dir):
-        os.mkdir(feature_dir)
+def read_manifest(dataset, start = 0):
+    n_speakers = 0
+    rows = []
+    with open(MANIFEST_DIR.format(dataset), 'r') as f:
+        reader = csv.reader(f)
+        for sid, aid, filename, duration, samplerate in reader:
+            rows.append([int(sid) + start, aid, filename, duration, samplerate])
+            n_speakers = int(sid) + 1
+    return n_speakers, rows
 
-    wavlist = []
-    if train:
-        wav_list_file = os.getcwd() + '/log/aishell2_train.log'
-    else:
-        wav_list_file = os.getcwd() + '/log/aishell2_test.log'
+def save_manifest(dataset, rows):
+    rows.sort()
+    with open(MANIFEST_DIR.format(dataset), 'w') as f:
+        writer = csv.writer(f)
+        writer.writerows(rows)
 
-    if os.path.exists(wav_list_file):
-        with open(wav_list_file,'r') as fobj:
-            for i in fobj:
-                wavlist.append(i[0:-1])
-    else:
-        wavlist = readDirStruct(audio_dir, train)
-        
-    # prepare the necessary variables
-    showlist = np.asarray(wavlist)
-    channellist = np.zeros_like(showlist, dtype = int) 
-    # create feature extractor
-    extractor = sidekit.FeaturesExtractor(audio_filename_structure=audio_dir+'/{}.wav',
-                                          feature_filename_structure=feature_dir+"/{}.h5",
-                                          sampling_frequency=16000,
-                                          lower_frequency=133.3333,
-                                          higher_frequency=6955.4976,
-                                          filter_bank="log",
-                                          filter_bank_size=64,
-                                          window_size=0.025,
-                                          shift=0.01,
-                                          ceps_number=20,
-                                          vad="snr",
-                                          snr=40,
-                                          pre_emphasis=0.97,
-                                          save_param=["vad", "energy", "cep", "fb"],
-										  feature_type='mfcc',
-                                          keep_all_features=True)
-    # save the feature
-    print('start extracting feature')
-    extractor.save_list(show_list = showlist, 
-                        channel_list = channellist, 
-                        num_thread = cpu_count() // 2)
-    print('extract feature done')
+def create_manifest_librispeech():
+    dataset = 'SLR12'
+    n_speakers = 0
+    log = []
+    sids = dict()
+    for m in ['train-clean-100', 'train-clean-360']:
+        train_dataset = '/home/zeng/zeng/datasets/librispeech/{}'.format(m)
+        for speaker in tqdm(os.listdir(train_dataset), desc = dataset):
+            speaker_dir = os.path.join(train_dataset, speaker)
+            if os.path.isdir(speaker_dir):
+                speaker = int(speaker)
+                if sids.get(speaker) is None:
+                    sids[speaker] = n_speakers
+                    n_speakers += 1
+                for task in os.listdir(speaker_dir):
+                    task_dir = os.path.join(speaker_dir, task)
+                    aid = 0
+                    for audio in os.listdir(task_dir):
+                        if audio[0] != '.' and (audio.find('.flac') != -1 or audio.find('.wav') != -1):
+                            filename = os.path.join(task_dir, audio)
+                            info = sf.info(filename)
+                            log.append((sids[speaker], aid, filename, info.duration, info.samplerate))
+                        aid += 1
+    save_manifest(dataset, log)
 
-def readEnrollmentPaths(_path):
-    data = pd.read_csv(_path)
-    spk_indices = {}
-    grp_temp_indices = {}
-    classes = []
-    for label in data['SpeakerID']:
-        classes.append(str(label))
-    for grpid, label, ind in zip(data['GroupID'], data['SpeakerID'], data['FileID']):
-        if not str(label) in spk_indices.keys():
-            spk_indices[str(label)] = []
-        if not grpid in grp_temp_indices.keys():
-            grp_temp_indices[grpid] = []
-        spk_indices[str(label)].append(ind)
-        grp_temp_indices[grpid].append(str(label))
-    grp_indices = {k:set(v) for k, v in grp_temp_indices.items()}
-    return spk_indices, grp_indices, classes # 说话人-文件名列表，组编号-说话人列表，所有说话人集合
+def create_manifest_voxceleb1():
+    dataset = 'voxceleb1'
+    n_speakers = 0
+    log = []
+    train_dataset = '/home/zeng/zeng/datasets/voxceleb1/wav'
+    for speaker in tqdm(os.listdir(train_dataset), desc = dataset):
+        speaker_dir = os.path.join(train_dataset, speaker)
+        for sub_speaker in os.listdir(speaker_dir):
+            sub_speaker_path = os.path.join(speaker_dir, sub_speaker)
+            if os.path.isdir(sub_speaker_path):
+                aid = 0
+                for audio in os.listdir(sub_speaker_path):
+                    if audio[0] != '.' and (audio.find('.flac') != -1 or audio.find('.wav') != -1):
+                        filename = os.path.join(sub_speaker_path, audio)
+                        info = sf.info(filename)
+                        log.append((n_speakers, aid, filename, info.duration, info.samplerate))                    
+                    aid += 1
+        n_speakers += 1
+    save_manifest(dataset, log)
 
-def readTestPaths(_path):
-    data = pd.read_csv(_path)
-    indices = {}
-    classes = []
-    for label in data['GroupID']:
-        classes.append(label)
-    for grp, idx in zip(classes, data['FileID']):
-        if not grp in indices.keys():
-            indices[grp] = []
-        indices[grp].append(idx) # 组编号到文件名的映射
-    return indices, classes # 组编号-文件名列表，所有组集合
+def merge_manifest(datasets, dataset):
+    rows = []
+    n = len(datasets)
+    start = 0
+    for i in range(n):
+        n_speakers, temp = read_manifest(datasets[i], start = start)
+        rows.extend(temp)
+        start += n_speakers
+    with open(MANIFEST_DIR.format(dataset), 'w') as f:
+        writer = csv.writer(f)
+        writer.writerows(rows)
 
-def main():
-#train_audio_dir = '/home/zeng/zeng/aishell/wav'
-#train_feature_dir = '/home/zeng/zeng/aishell/mfcc_train_feature'
-	test_audio_dir = '/home/zeng/zeng/aishell/af2019-sr-devset-20190312/data'
-	test_feature_dir = '/home/zeng/zeng/aishell/pretraindeepspeaker/mfcc_test_feature'
-#	extractFeature(train_audio_dir, train_feature_dir, True)
-	extractFeature(test_audio_dir, test_feature_dir, False)
+def cal_eer(y_true, y_pred):
+    fpr, tpr, thresholds= roc_curve(y_true, y_pred, pos_label = 1)
+    eer = brentq(lambda x : 1. - x - interp1d(fpr, tpr)(x), 0., 1.)
+    thresh = interp1d(fpr, thresholds)(eer)
+    return eer, thresh
 
 if __name__ == '__main__':
-    main()
+    create_manifest_voxceleb1()
