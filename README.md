@@ -1,5 +1,5 @@
 # asv_neural_network
-neural network and loss for asv
+neural network and loss for asv implemented by PyTorch. (Triplet loss, LMCL, Angular Loss, Softmax)
 
 Thanks to [Runner up of TongDun ASV Competition](https://www.kesci.com/home/competition/forum/5bdc5926954d6e001060d5a9)
 
