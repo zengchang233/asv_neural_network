@@ -47,8 +47,12 @@ python train.py
 
 EER: 7.55%
 ## ResNet + Triplet
-waiting...
+```
+cd TripletLoss
+python train.py
+```
 
+EER: 6.34%
 ## Contact
 Email: zengchang.elec@gmail.com
 
