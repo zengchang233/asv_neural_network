@@ -52,7 +52,7 @@ cd TripletLoss
 python train.py
 ```
 
-EER: 6.34%
+EER: 5.92%
 ## Contact
 Email: zengchang.elec@gmail.com
 
