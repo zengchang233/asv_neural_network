@@ -3,6 +3,8 @@ import torch.nn.functional as F
 import torch
 import math
 
+# Large Margin Cosine Loss, a modified softmax loss for speaker verification
+# More detail information please read this paper: CosFace: Large Margin Cosine Loss for Deep Face Recognition
 class LMCL(nn.Module):
     def __init__(self, embedding_size, num_classes, s, m):
         super(LMCL, self).__init__()
@@ -21,7 +23,7 @@ class LMCL(nn.Module):
         m_logits = self.s * (logits - margin)
         return logits, m_logits
 
-class ReLU20(nn.Hardtanh):#relu
+class ReLU20(nn.Hardtanh): # relu
     def __init__(self, inplace=False):
         super(ReLU20, self).__init__(0, 20, inplace)
 
@@ -30,15 +32,15 @@ class ReLU20(nn.Hardtanh):#relu
         return inplace_str
 
 
-def conv3x3(in_planes, out_planes, stride=1):#3x3卷积，输入通道，输出通道，stride
+def conv3x3(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False)
 
 
-class BasicBlock(nn.Module):#定义block
+class BasicBlock(nn.Module):
 
     expansion = 1
 
-    def __init__(self, in_channels, channels, stride=1, downsample=None):#输入通道，输出通道，stride，下采样
+    def __init__(self, in_channels, channels, stride=1, downsample=None):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(in_channels, channels, stride)
         self.bn1 = nn.BatchNorm2d(channels)
@@ -63,11 +65,18 @@ class BasicBlock(nn.Module):#定义block
 
         out += residual
         out = self.relu(out)
-        return out#block输出
+        return out
 
 
-class EmbeddingNet(nn.Module):#定义resnet
-    def __init__(self, layers, block=BasicBlock, embedding_size=None, n_classes=1000):#block类型，embedding大小，分类数，maigin大小
+class EmbeddingNet(nn.Module): # define the original resnet whose output is normalized
+    def __init__(self, layers, block=BasicBlock, embedding_size=None, n_classes=1000):
+        '''
+        Params:
+            layers: residual block number
+            block: residual block
+            embedding_size: output vector size
+            n_classes: the number of speakers
+        '''
         super(EmbeddingNet, self).__init__()
         if embedding_size is None:
             embedding_size = n_classes
@@ -96,14 +105,14 @@ class EmbeddingNet(nn.Module):#定义resnet
             nn.BatchNorm1d(embedding_size)
         )
 
-        for m in self.modules():#对于各层参数的初始化
-            if isinstance(m, nn.Conv2d):#以2/n的开方为标准差，做均值为0的正态分布
+        for m in self.modules(): # initialize the parameters of model
+            if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
                 m.weight.data.normal_(0, math.sqrt(2. / n))
-            elif isinstance(m, nn.BatchNorm2d):#weight设置为1，bias为0
+            elif isinstance(m, nn.BatchNorm2d): # weight is set as 1，bias is set as 0
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
-            elif isinstance(m, nn.BatchNorm1d):#weight设置为1，bias为0
+            elif isinstance(m, nn.BatchNorm1d): # weight is set as 1，bias is set as 0
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
@@ -136,8 +145,17 @@ class EmbeddingNet(nn.Module):#定义resnet
 
         return x, F.normalize(x)
 
+
+# ResNet-like model, the output of the last hidden layer is normalized to 1 and no activation such as relu.
 class ResNet(nn.Module):
     def __init__(self, layers, block=BasicBlock, embedding_size=None, n_classes=1211, s = 20, m = 0.2):
+        '''
+        Params:
+            s: hyperparameter in lmcl, it is used for fast convergence, it has lower limitation 
+               according to the number of speakers. Please read the cosface paper for more detail.
+            m: hyperparameter in lmcl, it is used for more compact embedding, larger m, more compact.
+               the upper limitation is about 0.35
+        '''
         super(ResNet, self).__init__()
         self.embedding_net = EmbeddingNet(layers, block, embedding_size, n_classes)
         self.lmcl = LMCL(embedding_size, n_classes, s, m)

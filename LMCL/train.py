@@ -35,10 +35,10 @@ class Args:
         self.load_optimizer = True
         self.seed = 123456
 
-        self.use_out = True
+        self.use_out = False
         self.use_embedding = True
 
-        self.test_batch_size = 128
+        self.test_batch_size = 1
         self.transform = transforms.Compose([
             TruncatedInput(input_per_file=1),
             ToTensor(),
@@ -49,23 +49,33 @@ device = torch.device('cuda')
 os.makedirs(args.model_dir, exist_ok=True)
 os.makedirs(args.final_dir, exist_ok=True)
 
-def train(epoch, model, criterion, optimizer, train_loader):#训练轮数，模型，loss，优化器，数据集读取
-    model.train()#初始化模型为训练模式
-    adjust_learning_rate(optimizer, epoch)#调整学习率
+def train(epoch, model, criterion, optimizer, train_loader):
+    '''
+    Params:
+        epoch: current training epoch
+        model: network model
+        criterion: loss function
+        optimizer: optimizer for model
+        train_loader: dataloader for trainset
+    Return:
+        None
+    '''
+    model.train() # set the model in train mode
+    adjust_learning_rate(optimizer, epoch) # adjust the learning rate
 
     sum_loss, sum_samples = 0, 0
     progress_bar = tqdm(enumerate(train_loader))
     for batch_idx, (data, label) in progress_bar:
         sum_samples += len(data)
         data = data.to(device)
-        label = label.to(device)  # 数据和标签
+        label = label.to(device)  # move the data to GPU
 
-        m_logits, _ = model(data, label)#通过模型，输出最后一层和倒数第二层
+        m_logits, _ = model(data, label) # forward propagation, output the lmcl logits and the embedding
 
-        loss = criterion(m_logits, label)#loss
-        optimizer.zero_grad()
-        loss.backward()#bp训练
-        optimizer.step()
+        loss = criterion(m_logits, label) # loss
+        optimizer.zero_grad() # clean gradient
+        loss.backward() # calculate gradient and backward propagation
+        optimizer.step() # update parameters
 
         sum_loss += loss.item() * len(data)
         progress_bar.set_description(
@@ -76,27 +86,32 @@ def train(epoch, model, criterion, optimizer, train_loader):#训练轮数，模�
 
     torch.save({'epoch': epoch, 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict()},
-               '{}/net_{}.pth'.format(args.model_dir, epoch))#保存当轮的模型到net_{}.pth
+               '{}/net_{}.pth'.format(args.model_dir, epoch))# save current model in the path net_{}.pth
     torch.save({'epoch': epoch, 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict()},
-               '{}/net.pth'.format(args.final_dir))#保存当轮的模型到net.pth
+               '{}/net.pth'.format(args.final_dir))# save current model in final_model/sgd/{}/net.pth
 
-def test(model, test_loader):#测试，模型，测试集读取
-    model.eval()#设置为测试模式
+def test(model, test_loader):
+    '''
+    Params:
+        model: network model
+        test_loader: dataloader for testset
+    '''
+    model.eval() # set it as the evaluation mode
 
     pairs, similarities_out, similarities_embedding = [], [], []
     progress_bar = tqdm(enumerate(test_loader))
-    for batch_idx, (pair, data1, data2) in progress_bar:#按batch读取数据
+    for batch_idx, (pair, data1, data2) in progress_bar: # load data according to batch sizez(set it in Args)
         pairs.append(pair)
         with torch.no_grad():
             data1, data2 = data1.to(device), data2.to(device)
 
             out1, embedding1 = model(data1)
             out2, embedding2 = model(data2)
-            if args.use_out:#使用最后一层计算余弦相似度
+            if args.use_out: # use the lmcl logits to calculate the cosine similarity
                 sim_out = F.cosine_similarity(out1, out2).cpu().data.numpy()
                 similarities_out.append(sim_out)
-            if args.use_embedding:#使用倒数第二层计算余弦相似度
+            if args.use_embedding: # use the output of last hidden layer to calculate the cosine similarity
                 sim_embedding = F.cosine_similarity(embedding1, embedding2).cpu().data.numpy()
                 similarities_embedding.append(sim_embedding)
 
@@ -104,6 +119,7 @@ def test(model, test_loader):#测试，模型，测试集读取
                 batch_idx + 1, len(test_loader), 100. * (batch_idx + 1) / len(test_loader)))
 
     pairs = np.concatenate(pairs)
+    # write the score in pred.csv file
     if args.use_out:
         similarities_out = np.array([sub_sim for sim in similarities_out for sub_sim in sim])
         if VAD:
@@ -114,6 +130,7 @@ def test(model, test_loader):#测试，模型，测试集读取
             f.write('pairID,pred\n')
             for i in range(len(similarities_out)):
                 f.write('{},{}\n'.format(pairs[i], similarities_out[i]))
+    # write the score in pred.csv file
     if args.use_embedding:
         similarities_embedding = np.array([sub_sim for sim in similarities_embedding for sub_sim in sim])
         if VAD:
@@ -126,24 +143,26 @@ def test(model, test_loader):#测试，模型，测试集读取
                 f.write('{},{}\n'.format(pairs[i], similarities_embedding[i]))
 
 def main():
-    torch.manual_seed(args.seed)#设置随机种子
+    torch.manual_seed(args.seed) # set the random seed
 
-    train_dataset = SpeakerTrainDataset()#设置训练集读取
-    n_classes = train_dataset.n_classes#说话人数
+    train_dataset = SpeakerTrainDataset() # create trainset
+    n_classes = train_dataset.n_classes # get the number of speakers
     print('Num of classes: {}'.format(n_classes))
 
+    # instantiation network model
     model = ResNet(layers=[1, 1, 1], embedding_size=args.embedding_size, n_classes=n_classes, s = args.s, m=args.m)
-    model.to(device)
-    if args.optimizer == 'sgd':#优化器使用sgd
+    model.to(device) # move model to GPU
+    if args.optimizer == 'sgd': # sgd optimizer (set it in Args)
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, dampening=args.dampening, weight_decay=args.wd)
-    elif args.optimizer == 'adagrad':#优化器使用adagrad
+    elif args.optimizer == 'adagrad': # adagrad optimizer
         optimizer = torch.optim.Adagrad(model.parameters(), lr=args.lr, lr_decay=args.lr_decay, weight_decay=args.wd)
-    else:#优化器使用adam
+    else: # adam optimizer
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    # loss function
     criterion = nn.CrossEntropyLoss()
 
     start = 1
-    if args.resume:#是否从之前保存的模型开始
+    if args.resume: # load model from checkpoint
         if os.path.isfile(args.resume):
             print('=> loading checkpoint {}'.format(args.resume))
             checkpoint = torch.load(args.resume)
@@ -166,7 +185,7 @@ def main():
 
     for epoch in range(start, args.epochs + 1):
         train(epoch, model, criterion, optimizer, train_loader)
-        test(model, test_loader)#测试
+        test(model, test_loader)
         task = pd.read_csv('task/task.csv', header=None, delimiter = '[ ]', engine='python')
         pred = pd.read_csv(args.final_dir + 'pred.csv', engine='python')
         y_true = np.array(task.iloc[:, 0])

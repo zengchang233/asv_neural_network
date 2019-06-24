@@ -110,4 +110,5 @@ def cal_eer(y_true, y_pred):
     return eer, thresh
 
 if __name__ == '__main__':
+    # make the manifest file which is like the combination of wav.scp and utt2spk
     create_manifest_voxceleb1()
