@@ -11,7 +11,7 @@ import sys
 import numpy as np
 
 SAMPLE_RATE = 16000
-MANIFEST_DIR = '/home/zeng/zeng/datasets/voxceleb1/manifest/{}_manifest.csv'
+MANIFEST_DIR = '/home/zeng/zeng/my_code/angular_softmax/manifest/{}_manifeat.csv'
 
 def read_manifest(dataset, start = 0):
     n_speakers = 0
@@ -74,23 +74,6 @@ def create_manifest_voxceleb1():
         n_speakers += 1
     save_manifest(dataset, log)
 
-def create_manifest_voxceleb2():
-    dataset = 'voxceleb2'
-    n_speakers = 0
-    log = []
-    train_dataset = '/home/zeng/zeng/datasets/voxceleb2/wav'
-    for speaker in tqdm(os.listdir(train_dataset), desc = dataset):
-        speaker_dir = os.path.join(train_dataset, speaker)
-        aid = 0
-        for audio in os.listdir(speaker_dir):
-            if audio[0] != '.' and (audio.find('.flac') != -1 or audio.find('.wav') != -1):
-                filename = os.path.join(speaker_dir, audio)
-                info = sf.info(filename)
-                log.append((n_speakers, aid, filename, info.duration, info.samplerate))
-                aid += 1
-        n_speakers += 1
-    save_manifest(dataset, log)
-
 def merge_manifest(datasets, dataset):
     rows = []
     n = len(datasets)
@@ -110,5 +93,14 @@ def cal_eer(y_true, y_pred):
     return eer, thresh
 
 if __name__ == '__main__':
-    # make the manifest file which is like the combination of wav.scp and utt2spk
-    create_manifest_voxceleb1()
+    if sys.argv[1] == 'eer':
+        task = pd.read_csv('task/task.csv', header = None, delimiter = '[ ]', engine = 'python')
+        pred = pd.read_csv('final_model/sgd/vox1/pred.csv', engine = 'python')
+        y_true = np.array(task.iloc[:,0])
+        y_pred = np.array(pred.iloc[:,-1])
+        eer, thresh = cal_eer(y_true, y_pred)
+        print('EER: {:.3%}'.format(eer))
+    else:
+        #create_manifest_librispeech()
+        create_manifest_voxceleb1()
+        #merge_manifest(['SLR12', 'voxceleb1'], 'all')

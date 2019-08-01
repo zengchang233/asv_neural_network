@@ -1,10 +1,37 @@
 from torch import nn
+from torch.autograd import Variable
 import torch.nn.functional as F
 import torch
 import math
 
-# Large Margin Cosine Loss, a modified softmax loss for speaker verification
-# More detail information please read this paper: CosFace: Large Margin Cosine Loss for Deep Face Recognition
+class OnlineTripletLoss(nn.Module):
+    def __init__(self, centers, margin, selector = 'hardest', cpu=False):
+        super(OnlineTripletLoss, self).__init__()
+        self.cpu = cpu
+        self.margin = margin
+        self.centers = F.normalize(centers)
+        self.centers.requires_grad = False
+        self.selector = selector
+
+    def forward(self, embeddings, labels):
+        if self.cpu:
+            embeddings = embeddings.cpu()
+        cos_matrix = F.linear(embeddings, self.centers)# cos_matrix batch_size * 1211
+        rows = torch.arange(embeddings.size(0))
+        positive_cos = cos_matrix[rows, labels].view(-1,1) # 32 * 1
+        idx = torch.ones((embeddings.size(0), self.centers.size(0)), dtype = rows.dtype) # 32 * 1211
+        idx[rows, labels] = 0
+        negative_cos_matrix = cos_matrix[idx > 0].view(embeddings.size(0), -1) # 32 * 1210
+        loss_values = negative_cos_matrix + self.margin - positive_cos # 求出所有的loss 32 * 1210
+        if self.selector == 'hardest': # 挑选出最大的loss
+            loss_value, _ = torch.max(loss_values, dim = 1)
+        if self.selector == 'hard':
+            pass
+        if self.selector == 'semihard':
+            pass
+        losses = F.relu(loss_value.view(-1,1))
+        return losses.mean(), (loss_value > 0).sum().item() 
+
 class LMCL(nn.Module):
     def __init__(self, embedding_size, num_classes, s, m):
         super(LMCL, self).__init__()
@@ -14,16 +41,16 @@ class LMCL(nn.Module):
         self.m = m
         self.weights = nn.Parameter(torch.Tensor(num_classes, embedding_size))
         nn.init.kaiming_normal_(self.weights)
-    
+
     def forward(self, embedding, label):
         assert embedding.size(1) == self.embedding_size, 'embedding size wrong'
         logits = F.linear(F.normalize(embedding), F.normalize(self.weights))
         margin = torch.zeros_like(logits)
-        margin.scatter_(1, label.view(-1,1), self.m)
+        margin.scatter_(1, label.view(-1, 1), self.m)
         m_logits = self.s * (logits - margin)
-        return logits, m_logits
+        return logits, m_logits, self.s * F.normalize(embedding), F.normalize(self.weights)
 
-class ReLU20(nn.Hardtanh): # relu
+class ReLU20(nn.Hardtanh):#relu
     def __init__(self, inplace=False):
         super(ReLU20, self).__init__(0, 20, inplace)
 
@@ -32,15 +59,15 @@ class ReLU20(nn.Hardtanh): # relu
         return inplace_str
 
 
-def conv3x3(in_planes, out_planes, stride=1):
+def conv3x3(in_planes, out_planes, stride=1):#3x3卷积，输入通道，输出通道，stride
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False)
 
 
-class BasicBlock(nn.Module):
+class BasicBlock(nn.Module):#定义block
 
     expansion = 1
 
-    def __init__(self, in_channels, channels, stride=1, downsample=None):
+    def __init__(self, in_channels, channels, stride=1, downsample=None):#输入通道，输出通道，stride，下采样
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(in_channels, channels, stride)
         self.bn1 = nn.BatchNorm2d(channels)
@@ -65,38 +92,31 @@ class BasicBlock(nn.Module):
 
         out += residual
         out = self.relu(out)
-        return out
+        return out#block输出
 
 
-class EmbeddingNet(nn.Module): # define the original resnet whose output is normalized
-    def __init__(self, layers, block=BasicBlock, embedding_size=None, n_classes=1000):
-        '''
-        Params:
-            layers: residual block number
-            block: residual block
-            embedding_size: output vector size
-            n_classes: the number of speakers
-        '''
-        super(EmbeddingNet, self).__init__()
+class ResNet(nn.Module):#定义resnet
+    def __init__(self, layers, block=BasicBlock, embedding_size=None, n_classes=1000, s = 8, m=0.2):#block类型，embedding大小，分类数，maigin大小
+        super(ResNet, self).__init__()
         if embedding_size is None:
             embedding_size = n_classes
 
         self.relu = ReLU20(inplace=True)
 
-        self.in_planes = 64
-        self.conv1 = nn.Conv2d(1, 64, kernel_size=5, stride=2, padding=2, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.layer1 = self._make_layer(block, 64, layers[0])
-
         self.in_planes = 128
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=5, stride=2, padding=2, bias=False)
-        self.bn2 = nn.BatchNorm2d(128)
-        self.layer2 = self._make_layer(block, 128, layers[1])
+        self.conv1 = nn.Conv2d(1, self.in_planes, kernel_size=5, stride=2, padding=2, bias=False)
+        self.bn1 = nn.BatchNorm2d(self.in_planes)
+        self.layer1 = self._make_layer(block, self.in_planes, layers[0])
 
         self.in_planes = 256
-        self.conv3 = nn.Conv2d(128, 256, kernel_size=5, stride=2, padding=2, bias=False)
-        self.bn3 = nn.BatchNorm2d(256)
-        self.layer3 = self._make_layer(block, 256, layers[2])
+        self.conv2 = nn.Conv2d(128, self.in_planes, kernel_size=5, stride=2, padding=2, bias=False)
+        self.bn2 = nn.BatchNorm2d(self.in_planes)
+        self.layer2 = self._make_layer(block, self.in_planes, layers[1])
+
+        self.in_planes = 512
+        self.conv3 = nn.Conv2d(256, self.in_planes, kernel_size=5, stride=2, padding=2, bias=False)
+        self.bn3 = nn.BatchNorm2d(self.in_planes)
+        self.layer3 = self._make_layer(block, self.in_planes, layers[2])
 
         self.avg_pool = nn.AdaptiveAvgPool2d([4, 1])
 
@@ -105,14 +125,17 @@ class EmbeddingNet(nn.Module): # define the original resnet whose output is norm
             nn.BatchNorm1d(embedding_size)
         )
 
-        for m in self.modules(): # initialize the parameters of model
-            if isinstance(m, nn.Conv2d):
+        #self.angle_linear = AngleLinear(in_features=embedding_size, out_features=n_classes, m=m)
+        self.lmcl = LMCL(embedding_size, n_classes, s, m)
+
+        for m in self.modules():#对于各层参数的初始化
+            if isinstance(m, nn.Conv2d):#以2/n的开方为标准差，做均值为0的正态分布
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
                 m.weight.data.normal_(0, math.sqrt(2. / n))
-            elif isinstance(m, nn.BatchNorm2d): # weight is set as 1，bias is set as 0
+            elif isinstance(m, nn.BatchNorm2d):#weight设置为1，bias为0
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
-            elif isinstance(m, nn.BatchNorm1d): # weight is set as 1，bias is set as 0
+            elif isinstance(m, nn.BatchNorm1d):#weight设置为1，bias为0
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
@@ -123,7 +146,7 @@ class EmbeddingNet(nn.Module): # define the original resnet whose output is norm
             layers.append(block(self.in_planes, planes))
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, target=None):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -143,27 +166,9 @@ class EmbeddingNet(nn.Module): # define the original resnet whose output is norm
         x = x.view(x.size(0), -1)
         x = self.fc(x)
 
-        return x, F.normalize(x)
-
-
-# ResNet-like model, the output of the last hidden layer is normalized to 1 and no activation such as relu.
-class ResNet(nn.Module):
-    def __init__(self, layers, block=BasicBlock, embedding_size=None, n_classes=1211, s = 20, m = 0.2):
-        '''
-        Params:
-            s: hyperparameter in lmcl, it is used for fast convergence, it has lower limitation 
-               according to the number of speakers. Please read the cosface paper for more detail.
-            m: hyperparameter in lmcl, it is used for more compact embedding, larger m, more compact.
-               the upper limitation is about 0.35
-        '''
-        super(ResNet, self).__init__()
-        self.embedding_net = EmbeddingNet(layers, block, embedding_size, n_classes)
-        self.lmcl = LMCL(embedding_size, n_classes, s, m)
-
-    def forward(self, x, target = None):
-        out, embedding = self.embedding_net(x)
+        #logit = self.angle_linear(x)
         if target is None:
-            return out, embedding
+            return x, F.normalize(x)
         else:
-            logits, m_logits = self.lmcl(out, target)
-            return m_logits, logits
+            _, m_logit, __, ___ = self.lmcl(x, target)
+            return m_logit, x #返回最后一层和倒数第二层的表示
