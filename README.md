@@ -56,4 +56,4 @@ EER: 5.92%
 ## Contact
 Email: zengchang.elec@gmail.com
 
-WeChat: zengchang-_-|
+WeChat: zengchang-_-
